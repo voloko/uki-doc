@@ -1,7 +1,7 @@
 <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
 <html xmlns="http://www.w3.org/1999/xhtml" xml:lang="ru">
 <head>
-    <title>Docs for somenthing</title>
+    <title>Docs</title>
     <meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/>
     <style type="text/css">
         html, body { overflow: hidden; width: 100%; height: 100%; padding: 0; margin: 0; }
@@ -430,7 +430,8 @@
                     { view: 'List', rect: '299 470', anchors: 'left top bottom right', rowHeight: '46', 
                         textSelectable: false, className: 'list',
                         render: new uki.doc.view.SearchListRender() }
-                ], visible: false, name: 'listScroll' }
+                ], visible: false, name: 'listScroll' },
+                { view: 'Label', rect: '10 70 200 20', anchors: 'left top', text: 'Loading...', name: 'loading' }
             ],
             rightChildViews: [
                 { view: 'uki.doc.view.NativeIframe', rect: '700 500', anchors: 'left top right bottom' },
@@ -502,6 +503,12 @@
             });
             
             treeList.treeData(tree);
+            page.find('[name=loading]').visible(false);
+            
+            var query = (location.hash || '').match(/q=([^&]+)/);
+            if (query) {
+                search.value(query[1]).trigger('click');
+            }
         };
         
         page.find('NativeIframe').src('class_index.html')
