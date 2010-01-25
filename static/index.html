@@ -1,0 +1,514 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="ru">
+<head>
+    <title>Docs for somenthing</title>
+    <meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/>
+    <style type="text/css">
+        html, body { overflow: hidden; width: 100%; height: 100%; padding: 0; margin: 0; }
+    </style>
+</head>
+<body>
+    <style type="text/css">
+        .list .selected {
+            background: #3875D7;
+            color: #FFF;
+        }
+        
+        .list {
+            font-size: 11px;
+            line-height: 11px;
+            color: #333;
+        }
+        
+        .list .text {
+            font-size: 13px;
+            line-height: 13px;
+            padding-bottom: 2px;
+        }
+        
+        .list .extra {
+            color: #777;
+        }
+        
+        .list .selected .extra {
+            color: #CCC;
+        }
+        
+        .list .memberOf {
+            padding-bottom: 2px;
+        }
+        
+        .list .desc {
+            color: #999;
+        }
+        
+        .list .selected .desc {
+            color: #BBB;
+        }
+        
+        
+        .tree .selected {
+            background: #3875D7;
+            color: #FFF;
+        }
+        
+        .tree .group {
+            color: #999;
+            font-style: italic;
+        }
+        
+        .tree .selected .group {
+            color: #CCC;
+        }
+    </style>
+    <script type="text/javascript" src="uki.js"></script>
+    <script type="text/javascript">
+        uki.doc = { view: {} };
+        
+        /**
+         * Search by chunks
+         */
+        uki.doc.Searchable = uki.newClass(uki.view.Observable, new function() {
+            this.chunkSize = 100;
+            this.chunkTimeout = 20;
+            this.passes = 3;
+            this.guid = 1;
+
+            this.init = function(data) {
+                this.items = data;
+            };
+
+            this.search = function(query) {
+                stopSearch.call(this);
+
+                this._query = query;
+                var iterator = this.createIterator(query);
+
+                this.trigger('search.start', iterator);
+                filterChunk.call(this, iterator);
+            };
+
+            this.matchRow = function( row, iterator ) { 
+                var matchFunc, hltFunc;
+                
+                if (iterator.pass == 0) {
+                    matchFunc = matchPass1;
+                    hltFunc = highlightQuery;
+                } else if (iterator.pass == 1) {
+                    matchFunc = matchPass2;
+                    hltFunc = highlightQuery;
+                } else if (iterator.pass == 2) {
+                    matchFunc = matchPassRegexp;
+                    hltFunc = highlightRegexp;
+                }
+                
+                if (row.foundId != iterator.id && matchFunc(row.searchIndex, row.longSearchIndex, iterator.queries, iterator.regexps)) {
+                    hltFunc(row, iterator.queries, iterator.regexps, iterator.highlighters);
+                    row.hName = hlt(row.hName);
+                    row.hMemberOf = hlt(row.hMemberOf);
+                    row.foundId = iterator.id;
+                    return true;
+                }
+                return false;
+            };
+
+            function splitQuery(query) {
+                return uki.grep(query.split(/(\s+|\(\)?)/), function(string) { return string.match(/\S/); });
+            }
+
+            function buildRegexps(queries) {
+                return uki.map(queries, function(query) { return new RegExp(query.replace(/(.)/g, '([$1])([^$1]*?)'), 'i'); });
+            }
+
+            function buildHilighters(queries) {
+                return uki.map(queries, function(query) {
+                    return uki.map( query.split(''), function(l, i){ return '\u0001$' + (i*2+1) + '\u0002$' + (i*2+2); } ).join('');
+                });
+            }
+            
+            /*  ----- Mathchers ------  */
+            function matchPass1(index, longIndex, queries, regexps) {
+                if (index.indexOf(queries[0]) != 0) return false;
+                for (var i=1, l = regexps.length; i < l; i++) {
+                    if (!index.match(regexps[i]) && !longIndex.match(regexps[i])) return false;
+                };
+                return true;
+            }
+
+            function matchPass2(index, longIndex, queries, regexps) {
+                if (index.indexOf(queries[0]) == -1) return false;
+                for (var i=1, l = regexps.length; i < l; i++) {
+                    if (!index.match(regexps[i]) && !longIndex.match(regexps[i])) return false;
+                };
+                return true;
+            }
+
+            function matchPassRegexp(index, longIndex, queries, regexps) {
+                if (!index.match(regexps[0])) return false;
+                for (var i=1, l = regexps.length; i < l; i++) {
+                    if (!index.match(regexps[i]) && !longIndex.match(regexps[i])) return false;
+                };
+                return true;
+            }
+            
+            function hlt(html) {
+                return (html || '').replace(/\u0001/g, '<b>').replace(/\u0002/g, '</b>')
+            }
+            
+
+
+            /*  ----- Highlighters ------  */
+            function highlightRegexp(result, queries, regexps, highlighters) {
+                for (var i=0, l = regexps.length; i < l; i++) {
+                    result.hName = result.name.replace(regexps[i], highlighters[i]);
+                    if (i > 0)
+                        result.hMemberOf = result.memberOf.replace(regexps[i], highlighters[i]);
+                };
+                return result;
+            }
+
+            function hltSubstring(string, pos, length) {
+                return string.substring(0, pos) + '\u0001' + string.substring(pos, pos + length) + '\u0002' + string.substring(pos + length);
+            }
+
+            function highlightQuery(result, queries, regexps, highlighters) {
+                var pos = 0, lcName = result.name.toLowerCase();
+                pos = lcName.indexOf(queries[0]);
+                if (pos != -1) {
+                    result.hName = hltSubstring(result.name, pos, queries[0].length);
+                }
+                for (var i=1, l = regexps.length; i < l; i++) {
+                    result.hName = result.name.replace(regexps[i], highlighters[i]);
+                    result.hMemberOf = result.memberOf.replace(regexps[i], highlighters[i]);
+                };
+                return result;
+            }
+            
+            this.createIterator = function(query) {
+                var queries = splitQuery(query);
+                return {
+                    query: query,
+                    queries: queries,
+                    regexps: buildRegexps(queries),
+                    highlighters: buildHilighters(queries),
+                    iteration: 0,
+                    found: 0,
+                    pass: 0,
+                    id: this.guid++
+                };
+            };
+
+            this._bindToDom = function() { return true; };
+
+            function filterChunk(iterator) {
+                var filtered = 0,
+                    _this = this,
+                    foundInChunk = [],
+                    item;
+
+                while(iterator.iteration < this.items.length) {
+                    if (filtered == this.chunkSize) {
+                        if (foundInChunk.length) this.trigger('search.foundInChunk', foundInChunk);
+                        this._searchTimer = setTimeout(function() { filterChunk.call(_this, iterator); }, this.chunkTimeout);
+                        return;
+                    }
+                    item = this.items[iterator.iteration];
+                    if (this.matchRow( item, iterator )) {
+                        iterator.found++;
+                        foundInChunk.push(item);
+                    }
+                    iterator.iteration++;
+                    filtered++;
+                    if (iterator.iteration == this.items.length && iterator.pass < this.passes - 1) {
+                        iterator.pass++;
+                        iterator.iteration = 0;
+                    }
+                }
+                if (foundInChunk.length) this.trigger('search.foundInChunk', foundInChunk);
+
+                stopSearch.call(this);
+                this.trigger('search.finish', iterator);
+            };
+
+            function stopSearch () {
+                if (this._searchTimer) {
+                    clearTimeout(this._searchTimer);
+                    this._searchTimer = false;
+                }
+            }    
+        });
+        
+        // really basic tree list implementation
+        uki.doc.view.TreeList = uki.newClass(uki.view.List, new function() {
+            var Base = uki.view.List.prototype,
+                proto = this;
+
+            proto.typeName = function() { return 'uki.doc.view.TreeList'; };
+            
+            proto._setup = function() {
+                Base._setup.call(this);
+                this._render = new uki.doc.view.TreeList.Render();
+            };
+
+            proto.treeData = uki.newProp('_treeData', function(v) {
+                this._treeData = v;
+                this.data(this._treeNodeToListData(v));
+            });
+
+            proto._treeNodeToListData = function(node, indent) {
+                indent = indent || 0;
+                return uki.map(node, function(row) {
+                    row.data.__treeNode = row;
+                    row.data.__indent = indent;
+                    return row.data;
+                });
+            };
+
+            proto.toggle = function(index) {
+                this._data[index].__opened ? this.close(index) : this.open(index);
+            };
+            
+            function recursiveLength (item) {
+                var children = item.__treeNode.children,
+                    length = children.length;
+                    
+                for (var i=0; i < children.length; i++) {
+                    if (children[i].data.__opened) length += recursiveLength(children[i].data);
+                };
+                return length;
+            }
+
+            proto.open = function(index, _skipUpdate) {
+                var selectedIndex = this._selectedIndex,
+                    item = this._data[index],
+                    children = item.__treeNode.children;
+                    
+                if (!children || !children.length || (item.__opened && !_skipUpdate)) return 0;
+                var length = children.length;
+
+                item.__opened = true;
+                this._data.splice.apply(this._data, [index+1, 0].concat( this._treeNodeToListData(children, item.__indent + 1) ));
+                
+                for (var i=children.length - 1; i >= 0 ; i--) {
+                    if (this._data[index+1+i].__opened) {
+                        length += this.open(index+1+i, true);
+                    }
+                };
+                if (!_skipUpdate) {
+                    this.data(this._data);
+                    this.selectedIndex(selectedIndex <= index ? selectedIndex : selectedIndex + length);
+                }
+                return length;
+            };
+
+            proto.close = function(index) {
+                var selectedIndex = this._selectedIndex,
+                    item = this._data[index],
+                    children = item.__treeNode.children;
+                    
+                if (!children || !children.length || !item.__opened) return;
+                var length = recursiveLength(item);
+
+                item.__opened = false;
+                this._data.splice(index+1, length);
+                this.data(this._data);
+                this.selectedIndex(
+                                    selectedIndex <= index ? selectedIndex : 
+                                    selectedIndex >= index + length ? index - length :
+                                    index
+                                  );
+            };
+
+            proto._mousedown = function(e) {
+                if (e.domEvent.target.className.indexOf('toggle-tree') > -1) {
+                    var o = uki.dom.offset(this._dom),
+                        y = e.domEvent.pageY - o.y,
+                        p = y / this._rowHeight << 0;
+                    this.toggle(p);
+                } else {
+                    Base._mousedown.call(this, e);
+                }
+            };
+
+            proto._keypress = function(e) {
+                Base._keypress.call(this, e);
+                e = e.domEvent;
+                if (e.which == 39 || e.keyCode == 39) { // RIGHT
+                    this.open(this._selectedIndex);
+                } else if (e.which == 37 || e.keyCode == 37) { // LEFT
+                    this.close(this._selectedIndex);
+                }
+            };
+
+        });
+
+        // tree list render
+        uki.doc.view.TreeList.Render = uki.newClass(uki.view.list.Render, new function() {
+            this._parentTemplate = new uki.theme.Template(
+                '<div class="row" style="position:relative;padding-top:3px;margin-left:${indent}px">' + 
+                    '<div class="toggle-tree" style="overflow:hidden;position:absolute;left:-15px;top:5px;background:url(${imgSrc});background-position:${position};width:10px;height:9px;"></div>${text}' +
+                '</div>'
+            );
+
+            this._leafTemplate = new uki.theme.Template(
+                '<div class="row" style="position:relative;padding-top:3px;margin-left:${indent}px">${text}</div>'
+            );
+
+            this.render = function(row, rect, i) {
+                var text = row.path ? row.name : '<span class="group">' + row.name + '</span>';
+                if (row.__treeNode.children && row.__treeNode.children.length) {
+                    return this._parentTemplate.render({ 
+                        text: text, 
+                        indent: row.__indent*18 + 22,
+                        imgSrc: 'i/arrows.png',
+                        position: row.__opened ? '0 -9px' : '0 0'
+                    });
+                } else {
+                    return this._leafTemplate.render({ 
+                        text: text, 
+                        indent: row.__indent*18 + 22
+                    });
+                }
+            };
+            
+            this.setSelected = function(container, data, state, focus) {
+                container.className = state ? 'selected' : '';
+            };
+        });
+        
+        uki.doc.view.SearchListRender = uki.newClass(uki.view.list.Render, new function() {
+            this._template = new uki.theme.Template(
+                '<div style="white-space: nowrap; padding: 4px 8px;">' +
+                    '<div class="text">${text}<span class="extra">${extra}</span></div>' +
+                    '<div class="memberOf">${memberOf}</div>' +
+                    '<div class="desc">${desc}</div>' +
+                '</div>'
+            );
+
+            this.render = function(row, rect, i) {
+                return this._template.render({
+                    text: row.hName || row.name,
+                    memberOf: row.hMemberOf || row.memberOf,
+                    extra: row.augments ? ' &lt; ' + row.augments : row.params,
+                    desc: row.desc
+                })
+            };
+            
+            this.setSelected = function(container, data, state, focus) {
+                container.className = state ? 'selected' : '';
+            };
+        });
+        
+        uki.doc.view.NativeIframe = uki.newClass(uki.view.Base, new function() {
+            this.typeName = function() { return 'uki.doc.view.NativeIframe'; };
+            
+            this._createDom = function() {
+                this._dom = uki.createElement('iframe', this.defaultCss + 'border:none;left:0;top:0;width:100%;height:100%');
+            };
+            
+            uki.delegateProp(this, 'src', '_dom');
+            
+            this._layoutDom = function() {};
+        });
+        
+        uki.Collection.addAttrs('treeData,src');
+        
+        
+        // page layout
+        var page = uki({ view: 'SplitPane', rect: '1000 500', anchors: 'left top right bottom', 
+            handlePosition: 299, handleWidth: 1,
+            leftChildViews: [
+                { view: 'Box', rect: '0 0 299 31', anchors: 'left top right', background: 'theme(panel)', style: { zIndex: 101 },
+                    childViews: [
+                        { view: 'TextField', rect: '5 5 288 22', anchors: 'left top right', placeholder: 'Search', name: 'search' }
+                    ]},
+                { view: 'ScrollPane', rect: '0 30 299 470', anchors: 'left top bottom right', childViews: [
+                    { view: 'uki.doc.view.TreeList', rect: '299 470', anchors: 'left top bottom right', rowHeight: '20', 
+                        style: { fontSize: '12px'}, textSelectable: false, className: 'tree' }
+                ], name: 'treeScroll' },
+                { view: 'ScrollPane', rect: '0 30 299 470', anchors: 'left top bottom right', childViews: [
+                    { view: 'List', rect: '299 470', anchors: 'left top bottom right', rowHeight: '46', 
+                        textSelectable: false, className: 'list',
+                        render: new uki.doc.view.SearchListRender() }
+                ], visible: false, name: 'listScroll' }
+            ],
+            rightChildViews: [
+                { view: 'uki.doc.view.NativeIframe', rect: '700 500', anchors: 'left top right bottom' },
+                { view: 'Box', rect: '700 500', anchors: 'left top right bottom', style: { zIndex: 101 }, id: 'dragOverlay', 
+                    visible: false }
+            ]
+        });
+        
+        // fix mozilla not sending mouse events over iframe
+        page[0]._acceptDrag = function(e) {
+            page.find('#dragOverlay').visible(true).layout();
+            return uki.view.SplitPane.prototype._acceptDrag.call(this, e);
+        };
+        page[0]._drop = function(e) {
+            page.find('#dragOverlay').visible(false);
+            return uki.view.SplitPane.prototype._drop.call(this, e);
+        };
+        
+        var searchList = page.find('List'),
+            treeList = page.find('TreeList'),
+            search = page.find('[name=search]'),
+            listScroll = page.find('[name=listScroll]'),
+            treeScroll = page.find('[name=treeScroll]');
+            
+        uki.each(['keypress', 'keydown', 'keyup'], function(i, name) {
+            search.bind(name, function(e) {
+                (treeScroll.visible() ? treeList : searchList).trigger(name, { domEvent: e.domEvent, source: treeList });
+            });
+        });
+        
+        function selectCurrent () {
+            var item = this.data()[this.selectedIndex()];
+            if (item && item.path) page.find('NativeIframe').src(item.path);
+        }
+        
+        uki.each([treeList, searchList], function(i, list) {
+            list.bind('keyup', function(e) {
+                e.domEvent.which == 13 && selectCurrent.call(this);
+            });
+
+            list.click(selectCurrent);
+        });
+        
+        page.attachTo(window, '1000 500');
+        search.focus();
+        
+        
+        uki.doc.indexesLoaded = function(tree, searchIndex) {
+            searchIndex = new uki.doc.Searchable(searchIndex);
+            var lastQuery;
+            
+            searchIndex.bind('search.foundInChunk', function(chunk) {
+                searchList.data(searchList.data().concat(chunk));
+            });
+            
+            search.bind('keyup keypress click', function() {
+                var query = this.value().toLowerCase();
+                if (lastQuery == query) return;
+                lastQuery = query;
+                if (query.match(/\S/)) {
+                    listScroll.visible(true).layout();
+                    treeScroll.visible(false);
+                    searchList.data([]);
+                    searchIndex.search(query);
+                } else {
+                    listScroll.visible(false);
+                    treeScroll.visible(true).layout();
+                }
+            });
+            
+            treeList.treeData(tree);
+        };
+        
+        page.find('NativeIframe').src('class_index.html')
+        
+        var script = document.createElement('script');
+        script.src = 'data.js';
+        document.body.appendChild(script);
+    </script>
+</body>
+</html>
