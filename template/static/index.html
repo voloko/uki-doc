@@ -73,6 +73,7 @@
             this.chunkTimeout = 20;
             this.passes = 3;
             this.guid = 1;
+            this.limit = 100;
 
             this.init = function(data) {
                 this.items = data;
@@ -206,7 +207,7 @@
                     foundInChunk = [],
                     item;
 
-                while(iterator.iteration < this.items.length) {
+                while(iterator.iteration < this.items.length && iterator.found < this.limit) {
                     if (filtered == this.chunkSize) {
                         if (foundInChunk.length) this.trigger('search.foundInChunk', foundInChunk);
                         this._searchTimer = setTimeout(function() { filterChunk.call(_this, iterator); }, this.chunkTimeout);
@@ -503,6 +504,12 @@
             });
             
             treeList.treeData(tree);
+            if (tree.length < 4) {
+                for (var i = tree.length - 1; i > 0; i--) {
+                    treeList[0].open(i);
+                };
+            }
+            
             page.find('[name=loading]').visible(false);
             
             var query = (location.hash || '').match(/q=([^&]+)/);
